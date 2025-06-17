@@ -5,6 +5,7 @@ import json
 import os
 import win32file  # pip install pywin32
 import pywintypes
+import sys
 
 # 🔧 設定項目
 SEARCH_QUERY = "BABYMETAL"
@@ -12,26 +13,29 @@ MIN_DURATION_SECONDS = 180           # 3分以上
 MAX_RESULTS = 5
 PLAYED_URLS_FILE = "played_urls.txt"
 MPV_IPC_PATH = r'\\.\\pipe\\mpvsocket'  # Windows Named Pipe path
+DEBUG_MODE = "--debug" in sys.argv
 
 # 🏃‍♂️ mpv IPC サーバ確認
 def is_mpv_running() -> bool:
     return os.path.exists(MPV_IPC_PATH)
 
 # 🎮 mpv に JSON コマンド送信（Windows Named Pipe）
-def send_to_mpv(command_dict: dict) -> bool:
-    message = (json.dumps(command_dict) + '\n').encode('utf-8')
+def send_to_mpv(command_dict):
     try:
         handle = win32file.CreateFile(
             MPV_IPC_PATH,
             win32file.GENERIC_WRITE,
-            0, None,
+            0,
+            None,
             win32file.OPEN_EXISTING,
-            0, None
+            0,
+            None
         )
-        win32file.WriteFile(handle, message)
-        handle.close()
+        message = json.dumps(command_dict) + '\n'
+        win32file.WriteFile(handle, message.encode('utf-8'))
+        win32file.CloseHandle(handle)
         return True
-    except pywintypes.error as e:
+    except Exception as e:
         print(f"⚠️ mpv にコマンド送信できませんでした: {e}")
         return False
 
@@ -40,10 +44,9 @@ def launch_mpv_ipc():
     print("📺 mpv をバックグラウンドで起動します...")
     subprocess.Popen([
         "mpv",
-        "--idle=yes",
-        "--force-window=yes", # ウィンドウを強制的に表示
-        f"--input-ipc-server={MPV_IPC_PATH}",
-        "--geometry=300:200"
+        "--idle",
+        "--no-terminal",
+        "--input-ipc-server=\\\\.\\pipe\\mpvsocket"
     ])
 
 # 🕑 再生終了イベントを待つ
@@ -110,6 +113,9 @@ def save_played_url(url):
 
 # ▶️ 再生
 def play_video(url):
+    if not is_mpv_running():
+        print("❌ mpvのIPCサーバが見つかりません。mpvが起動しているか確認してください。")
+        return
     if send_to_mpv({"command": ["loadfile", url, "replace"]}):
         print("🎵 動画を切り替えました")
     else:
@@ -120,7 +126,17 @@ def main():
     print("🎧 LoopTune (IPC モード) 起動しました。Ctrl+C で終了できます。\n")
     if not is_mpv_running():
         launch_mpv_ipc()
-        time.sleep(2)  # 起動待ち
+        print("mpv起動待機中...")
+        if not wait_for_mpv_ipc():
+            print("❌ mpvのIPCサーバが起動しませんでした。")
+            return
+
+    if DEBUG_MODE:
+        url = "https://www.youtube.com/watch?v=KEMVgy51kPE"
+        print(f"\n▶️ デバッグ再生: {url}\n")
+        play_video(url)
+        wait_for_end()
+        return
 
     while True:
         videos = search_videos(SEARCH_QUERY, MAX_RESULTS, MIN_DURATION_SECONDS)
@@ -142,6 +158,14 @@ def main():
             play_video(url)
             save_played_url(url)
             wait_for_end()  # 再生終了を待つ
+
+def wait_for_mpv_ipc(timeout=15):
+    """mpvのIPCサーバができるまで待つ（最大timeout秒）"""
+    for _ in range(timeout * 10):
+        if is_mpv_running():
+            return True
+        time.sleep(0.1)
+    return False
 
 if __name__ == "__main__":
     main()
