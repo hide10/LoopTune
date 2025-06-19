@@ -1,11 +1,22 @@
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, date
 
-def get_latest_babymetal_city():
+def get_latest_babymetal_city(cutoff_date: date | None = None) -> tuple[str, date] | None:
     """
-    Setlist.fmからBABYMETALの最新（過去）ライブの開催地を返す。
-    戻り値：例 "Atlanta, GA, USA"
+    Setlist.fm から BABYMETAL の直近（cutoff_date より前）の
+    ライブ開催地と日付を返す。
+
+    Parameters
+    ----------
+    cutoff_date : datetime.date | None
+        ・None の場合 : 今日を基準とする
+        ・指定した場合 : その日付より前のライブを対象とする
+
+    Returns
+    -------
+    (都市名, 開催日) のタプル。例: ("Atlanta, GA, USA", date(2025, 6, 18))
+    見つからない場合は None
     """
     url = "https://www.setlist.fm/setlists/babymetal-5bd19f80.html"
     headers = {
@@ -14,7 +25,10 @@ def get_latest_babymetal_city():
         "Cache-Control": "no-cache"
     }
 
-    response = requests.get(url, headers=headers)
+    if cutoff_date is None:
+        cutoff_date = datetime.today().date()
+
+    response = requests.get(url, headers=headers, timeout=15)
     if response.status_code != 200:
         return None
 
@@ -22,36 +36,32 @@ def get_latest_babymetal_city():
     blocks = soup.select(".col-xs-12.setlistPreview.vevent")
 
     latest_city = None
-    latest_date = datetime.min
-    today = datetime.today()
+    latest_date = datetime.min.date()
 
     for block in blocks:
         date_tag = block.select_one(".dateBlock .value-title[title]")
         if not date_tag:
             continue
 
-        date_str = date_tag["title"]  # YYYY-MM-DD
         try:
-            date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+            date_obj = datetime.strptime(date_tag["title"], "%Y-%m-%d").date()
         except ValueError:
             continue
 
-        if date_obj >= today:
-            continue  # 未来のライブは無視
+        if cutoff_date and date_obj >= cutoff_date:
+            continue
 
-        # 開催地の抽出
         locality = block.select_one(".locality")
-        region = block.select_one(".region")
-        country = block.select_one(".country-name")
+        region   = block.select_one(".region")
+        country  = block.select_one(".country-name")
 
         if locality and region and country:
             city_name = f"{locality.text.strip()}, {region.text.strip()}, {country.text.strip()}"
         else:
             city_name = "不明"
 
-        # 最新の過去日付で更新
         if date_obj > latest_date:
             latest_date = date_obj
             latest_city = city_name
 
-    return latest_city
+    return (latest_city, latest_date) if latest_city else None
