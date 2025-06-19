@@ -51,14 +51,18 @@ def get_latest_babymetal_city(cutoff_date: date | None = None) -> tuple[str, dat
         if cutoff_date and date_obj >= cutoff_date:
             continue
 
+        # 開催地の抽出（地域がなくても city + country でOKにする）
         locality = block.select_one(".locality")
-        region   = block.select_one(".region")
-        country  = block.select_one(".country-name")
+        region = block.select_one(".region")
+        country = block.select_one(".country-name")
 
-        if locality and region and country:
-            city_name = f"{locality.text.strip()}, {region.text.strip()}, {country.text.strip()}"
+        if locality and country:
+            if region:
+                city_name = f"{locality.text.strip()}, {region.text.strip()}, {country.text.strip()}"
+            else:
+                city_name = f"{locality.text.strip()}, {country.text.strip()}"
         else:
-            city_name = "不明"
+            continue  # 地域情報があまりに不足していたらスキップ
 
         if date_obj > latest_date:
             latest_date = date_obj
